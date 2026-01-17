@@ -1,48 +1,168 @@
-10. VIP Most Dangerous Game
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Mi Primer Emulador JS (Chip-8 Base)</title>
+    <style>
+        body { background-color: #222; color: #fff; font-family: monospace; display: flex; flex-direction: column; align-items: center; }
+        canvas { border: 2px solid #0f0; background-color: #000; width: 640px; height: 320px; image-rendering: pixelated; }
+        .controls { margin-top: 20px; }
+    </style>
+</head>
+<body>
 
-VIP Most Dangerous Game pits a hunter against a hunted in a maze.  The hunter must
-shoot the hunted before either time runs out or the hunted escapes the maze.
-However, neither the hunted nor the hunter can see a wall in the maze until he runs
-into it.  There is always at least one path through the maze.
+    <h1>EMULADOR CHIP-8 JS</h1>
+    <canvas id="display" width="64" height="32"></canvas>
+    
+    <div class="controls">
+        <input type="file" id="romInput">
+        <p>Carga una ROM (.ch8) para iniciar</p>
+    </div>
 
-How To Play VIP Most Dangerous Game
+    <script>
+        // --- LA CPU VIRTUAL ---
+        class Chip8 {
+            constructor() {
+                this.reset();
+            }
 
-1. Load the CHIP-8 interpretor at 0000-01FF
-   and the game starting at 0200.
+            reset() {
+                // 4KB de Memoria RAM
+                this.memory = new Uint8Array(4096);
+                // 16 Registros de 8-bits (V0 a VF)
+                this.v = new Uint8Array(16);
+                // Registro de índice I
+                this.i = 0;
+                // Program Counter (PC) - Empieza en 0x200 (estándar Chip-8)
+                this.pc = 0x200;
+                
+                // Pantalla (64x32 píxeles, blanco y negro)
+                this.display = new Array(64 * 32).fill(0);
+                
+                // Pila (Stack) para subrutinas
+                this.stack = [];
+                
+                // Temporizadores
+                this.delayTimer = 0;
+                this.soundTimer = 0;
+                
+                this.paused = true;
+            }
 
-2. Turn RUN switch on.
+            loadRom(romData) {
+                this.reset();
+                // Cargar la ROM en la memoria empezando en 0x200
+                for (let i = 0; i < romData.length; i++) {
+                    this.memory[0x200 + i] = romData[i];
+                }
+                this.paused = false;
+                console.log("ROM cargada. Iniciando CPU...");
+            }
 
-3. Hunted's turn:
-   When the arrow appears in the lower left, it is the hunted's turn.  Keys 2-4-6-8
-   control direction (up-left-right-down, respectively).  The hunted continues to
-   move until a) he makes 5 moves, b) he hits a wall or c) key 0 is pressed.
+            // EL CICLO DE LA CPU (FETCH - DECODE - EXECUTE)
+            cycle() {
+                if (this.paused) return;
 
-4. Hunter's turn
-   When the arrow appears in the lower right, it is the hunter's turn.  The hunter's
-   turn consists of two modes, the move and the shoot.  Keys 2-4-6-8 and 0 control both
-   modes.  Like the hunted, the hunter continues to move until a) he makes 3 moves,
-   b) he hits a wall or c) key 0 is pressed.  If he hits the wall, case b), he cannot
-   fire a bullet.  The hunter may fire one of his bullets using the direction keys
-   2-4-6-8.  The bullet will travel four squares in the corresponding direction, unless
-   a wall is encountered.  If the hunter prefers not to use a bullet, he must press key 0.
+                // 1. FETCH (Buscar): Leer 2 bytes de la memoria para formar el Opcode
+                // Ejemplo: 0xA2F0 (Un opcode son 16 bits)
+                let opcode = (this.memory[this.pc] << 8) | this.memory[this.pc + 1];
 
-5. Repeat steps 3 and 4 until:
-   a) The number of turns (upper left on the display) expire.  The hunted wins.
-   b) The hunter lands on or shoots the hunted.  The hunter wins.
-   c) The hunted lands on hunter, thereby giving up.  The hunter wins.
-   d) The hunted reaches the lower right corner of the maze with at least 1 move
-      remaining in his turn.  The hunted wins, by escaping the maze.
+                // 2. DECODE & EXECUTE (Decodificar y Ejecutar)
+                this.executeOpcode(opcode);
 
-6. Variations of VIP Most Dangerous Game may be played by changing certain bytes in
-   the program.
+                // Avanzar el Program Counter (PC)
+                this.pc += 2;
 
-Location Default Meaning
-0215	 0F	 Number of turns in the game.
-0217	 06	 Number of bullets hunter has at start.
-0219	 03	 Number of moves per turn for the hunter.
-0221	 01	 Number of squares per move (hunted and hunter).
-022B	 05	 Number of moves per turn for the hunted.
-024B	 01	 If zero, walls are invisible.
-0355	 04	 Number of squares a bullet will go.
-04E3	 70	 Probability (out of 100Hex) of a wall appearing.
-04EB	 FE	 If FF, a wall may appear at previously tested boundaries.
+                // Decrementar timers
+                if (this.delayTimer > 0) this.delayTimer--;
+                if (this.soundTimer > 0) this.soundTimer--;
+            }
+
+            executeOpcode(opcode) {
+                // Aquí es donde ocurre la magia. Hay que implementar 35 instrucciones.
+                // Usamos máscaras de bits para entender qué pide el juego.
+                
+                // Ejemplo: Limpiar pantalla (00E0)
+                if (opcode === 0x00E0) {
+                    this.display.fill(0);
+                    return;
+                }
+
+                // Ejemplo: Salto (Jump) - 1NNN
+                // Si el primer nibble (4 bits) es 1, saltamos a la dirección NNN
+                if ((opcode & 0xF000) === 0x1000) {
+                    this.pc = (opcode & 0x0FFF);
+                    this.pc -= 2; // Compensar el avance del ciclo
+                    return;
+                }
+
+                // Ejemplo: Set Register - 6XNN (V[x] = NN)
+                if ((opcode & 0xF000) === 0x6000) {
+                    let x = (opcode & 0x0F00) >> 8;
+                    let value = (opcode & 0x00FF);
+                    this.v[x] = value;
+                    return;
+                }
+                
+                // Ejemplo: Add Value - 7XNN (V[x] += NN)
+                if ((opcode & 0xF000) === 0x7000) {
+                    let x = (opcode & 0x0F00) >> 8;
+                    let value = (opcode & 0x00FF);
+                    this.v[x] += value;
+                    return;
+                }
+
+                // Aquí faltarían el resto de instrucciones...
+                console.log(`Opcode no implementado: ${opcode.toString(16)}`);
+            }
+        }
+
+        // --- SISTEMA PRINCIPAL (Main Loop) ---
+        const chip8 = new Chip8();
+        const canvas = document.getElementById('display');
+        const ctx = canvas.getContext('2d');
+        const scale = 10; // Escalar píxeles para verlos mejor
+
+        function draw() {
+            // Limpiar canvas
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Dibujar píxeles activos
+            ctx.fillStyle = '#0f0'; // Color verde hacker
+            for (let i = 0; i < chip8.display.length; i++) {
+                if (chip8.display[i] === 1) {
+                    let x = (i % 64) * scale;
+                    let y = Math.floor(i / 64) * scale;
+                    ctx.fillRect(x, y, scale, scale);
+                }
+            }
+        }
+
+        function step() {
+            // Ejecutar varios ciclos por frame para velocidad (aprox 60hz * 10)
+            for(let i=0; i<10; i++) {
+                chip8.cycle();
+            }
+            draw();
+            requestAnimationFrame(step);
+        }
+
+        // --- CARGADOR DE ARCHIVOS ---
+        document.getElementById('romInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const buffer = e.target.result;
+                const romData = new Uint8Array(buffer);
+                chip8.loadRom(romData);
+                step(); // Iniciar bucle
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+    </script>
+</body>
+</html>
